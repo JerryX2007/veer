@@ -1,0 +1,29 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+}
+
+body {
+  margin: 0;
+}
+
+button {
+  font: inherit;
+  padding: 0.4rem 0.9rem;
+  border-radius: 6px;
+  border: 1px solid #888;
+  background: transparent;
+  cursor: pointer;
+}
+
+button:hover {
+  background: rgba(128, 128, 128, 0.15);
+}
+
+input[type='text'] {
+  font: inherit;
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid #888;
+}
