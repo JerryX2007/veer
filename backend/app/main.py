@@ -3,10 +3,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from . import models
-from .database import engine
-from .routers import highlights, matches, rallies
+from .database import SessionLocal, engine
+from .routers import analysis, highlights, matches, rallies
+from .services.analysis_jobs import mark_interrupted_runs
 
 models.Base.metadata.create_all(bind=engine)
+with SessionLocal() as db:
+    mark_interrupted_runs(db)
 
 app = FastAPI(title="Volleyball Rally Tagger & Analyzer")
 
@@ -23,6 +26,7 @@ app.mount("/data", StaticFiles(directory="data"), name="data")
 app.include_router(matches.router)
 app.include_router(rallies.router)
 app.include_router(highlights.router)
+app.include_router(analysis.router)
 
 
 @app.get("/")

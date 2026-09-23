@@ -55,3 +55,32 @@ def concatenate_clips(clip_paths: list[str], output_name: str) -> str:
     subprocess.run(cmd, check=True, capture_output=True)
     list_file.unlink(missing_ok=True)
     return str(out_path)
+
+
+def render_segments(source_path: str, segments: list[tuple[float, float]], output_name: str) -> str:
+    """Cut each (start, end) range out of the source and join them into one video.
+
+    Unlike extract_clip this re-encodes, so every segment starts exactly on
+    its timestamp (the serve) instead of snapping to the nearest keyframe,
+    and all pieces share one format so concatenation is seamless.
+    """
+    parts = []
+    try:
+        for i, (start, end) in enumerate(segments):
+            part = CLIP_DIR / f"{output_name}.part{i}.mp4"
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(start),
+                "-i", source_path,
+                "-t", str(end - start),
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                "-pix_fmt", "yuv420p", "-r", "30",
+                "-c:a", "aac", "-ar", "48000", "-ac", "2",
+                str(part),
+            ]
+            subprocess.run(cmd, check=True, capture_output=True)
+            parts.append(str(part))
+        return concatenate_clips(parts, output_name)
+    finally:
+        for part in parts:
+            Path(part).unlink(missing_ok=True)
