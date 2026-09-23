@@ -51,3 +51,53 @@ export async function buildHighlightReel(matchId, outcomes) {
 export function videoUrl(relativePath) {
   return `${API_BASE}/${relativePath}`
 }
+
+// --- Automatic highlight detection ---------------------------------------
+
+async function jsonOrThrow(res, fallback) {
+  if (res.ok) return res.json()
+  let detail = fallback
+  try {
+    detail = (await res.json()).detail ?? fallback
+  } catch {
+    // keep the fallback message
+  }
+  throw new Error(typeof detail === 'string' ? detail : fallback)
+}
+
+export async function startAnalysis(matchId, settings = {}) {
+  const res = await fetch(`${API_BASE}/matches/${matchId}/analysis/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ settings }),
+  })
+  return jsonOrThrow(res, 'Failed to start analysis')
+}
+
+// Resolves to null if the match has never been analysed.
+export async function getAnalysis(matchId) {
+  const res = await fetch(`${API_BASE}/matches/${matchId}/analysis/`)
+  if (res.status === 404) return null
+  return jsonOrThrow(res, 'Failed to load analysis')
+}
+
+export async function deleteHighlight(matchId, highlightId) {
+  const res = await fetch(
+    `${API_BASE}/matches/${matchId}/analysis/highlights/${highlightId}`,
+    { method: 'DELETE' },
+  )
+  if (!res.ok) throw new Error('Failed to remove highlight')
+}
+
+export async function renderAutoReel(matchId) {
+  const res = await fetch(`${API_BASE}/matches/${matchId}/analysis/reel/render`, {
+    method: 'POST',
+  })
+  return jsonOrThrow(res, 'Failed to render reel')
+}
+
+export function formatTime(seconds) {
+  const s = Math.max(0, Math.round(seconds * 10) / 10)
+  const m = Math.floor(s / 60)
+  return `${m}:${(s - m * 60).toFixed(1).padStart(4, '0')}`
+}

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createRally, exportClip, listRallies, videoUrl } from '../api.js'
+import AutoHighlights from './AutoHighlights.jsx'
 
 const OUTCOMES = ['kill', 'ace', 'error', 'block', 'dig', 'serve', 'attack']
 
@@ -61,6 +62,8 @@ export default function RallyTagger({ match }) {
           </>
         )}
       </div>
+
+      <AutoHighlights match={match} videoRef={videoRef} />
 
       <h3>Tagged rallies</h3>
       <ul style={{ paddingLeft: '1.2rem' }}>
