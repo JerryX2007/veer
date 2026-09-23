@@ -142,7 +142,62 @@ def find_contacts(
             dv=float(dv[i]),
         ))
     contacts.sort(key=lambda c: c.index)
+    _refine_contacts(traj, contacts, half, gravity, min_dv)
     return contacts
+
+
+def _refine_contacts(
+    traj: Trajectory, contacts: list[Contact], half: int, gravity: float, min_dv: float
+) -> None:
+    """Pin down each contact's frame, then re-measure v_in / v_out.
+
+    The first pass smears contacts that are close together (an attack
+    straight into a block is shorter than the detection window). Here each
+    contact moves to the frame where a straight line before it and one after
+    it fit best (while still being a real change of velocity), and the fits
+    never reach past a neighbouring contact.
+    """
+    shift = max(1, half // 2)
+    for k, c in enumerate(contacts):
+        prev_i = contacts[k - 1].index if k > 0 else -1
+        next_i = contacts[k + 1].index if k + 1 < len(contacts) else traj.n
+        best, best_cost = c.index, np.inf
+        for j in range(max(prev_i + 1, c.index - shift), min(next_i, c.index + shift + 1)):
+            before, after = _fit(traj, prev_i, j, half, -1), _fit(traj, next_i, j, half, 1)
+            if not (before and after):
+                continue
+            (vx_in, vy_in), cost_in, t_in = before
+            (vx_out, vy_out), cost_out, t_out = after
+            dv = np.hypot(vx_out - vx_in, (vy_out - vy_in) - gravity * (t_out - t_in))
+            if dv >= min_dv and cost_in + cost_out < best_cost:
+                best, best_cost = j, cost_in + cost_out
+        if best_cost == np.inf:
+            continue
+        before, after = _fit(traj, prev_i, best, half, -1), _fit(traj, next_i, best, half, 1)
+        c.index, c.time = best, best / traj.fps
+        if traj.known[best]:
+            c.x, c.y = float(traj.x[best]), float(traj.y[best])
+        c.v_in, c.v_out = before[0], after[0]
+
+
+def _fit(traj: Trajectory, limit: int, i: int, half: int, direction: int):
+    """Line fit of the observed samples on one side of frame i.
+
+    Uses up to `half` frames, stopping short of the neighbouring contact at
+    `limit`. Returns ((vx, vy) per second, squared error, mean sample time)
+    or None when there are fewer than 3 samples.
+    """
+    if direction < 0:
+        idx = np.arange(max(limit + 1, i - half, 0), i + 1)
+    else:
+        idx = np.arange(i, min(limit, i + half + 1, traj.n))
+    idx = idx[traj.observed[idx]]
+    if idx.size < 3:
+        return None
+    t = idx / traj.fps
+    (vx, x0), (vy, y0) = np.polyfit(t, traj.x[idx], 1), np.polyfit(t, traj.y[idx], 1)
+    cost = np.sum((traj.x[idx] - (vx * t + x0)) ** 2 + (traj.y[idx] - (vy * t + y0)) ** 2)
+    return (float(vx), float(vy)), float(cost), float(t.mean())
 
 
 def estimate_gravity(traj: Trajectory, contacts: list[Contact], min_flights: int) -> Optional[float]:

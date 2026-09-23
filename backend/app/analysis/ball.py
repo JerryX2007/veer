@@ -112,8 +112,9 @@ class _Tracklet:
 
 
 def build_tracklets(
-    candidates_per_frame: list[list[Candidate]], frame_height: int, config: AnalysisConfig
+    candidates_per_frame: list[list[Candidate]], frame_height: int, max_step: float, config: AnalysisConfig
 ) -> list[_Tracklet]:
+    """`max_step` is the furthest (pixels) the ball can plausibly move in a frame."""
     gate_base = config.track_gate * frame_height
     active: list[_Tracklet] = []
     finished: list[_Tracklet] = []
@@ -122,8 +123,11 @@ def build_tracklets(
         pairs = []
         for ti, track in enumerate(active):
             px, py = track.predict(frame)
-            vx, vy = track.velocity()
-            gate = gate_base + 0.5 * np.hypot(vx, vy) * (frame - track.frames[-1])
+            df = frame - track.frames[-1]
+            if len(track.frames) == 1:
+                gate = gate_base + max_step * df  # no velocity yet: anywhere the ball could reach
+            else:
+                gate = gate_base + 0.5 * np.hypot(*track.velocity()) * df
             for ci, c in enumerate(candidates):
                 d = np.hypot(c.x - px, c.y - py)
                 if d <= gate:
@@ -172,7 +176,7 @@ def track_ball(
     max_step = MAX_BALL_SPEED * px_per_m / fps
 
     tracklets = [
-        t for t in build_tracklets(candidates_per_frame, frame_height, config)
+        t for t in build_tracklets(candidates_per_frame, frame_height, max_step, config)
         if len(t.frames) >= config.track_min_length and t.median_speed() >= min_speed
     ]
     tracklets.sort(key=lambda t: len(t.frames), reverse=True)

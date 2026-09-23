@@ -27,7 +27,7 @@ class AnalysisConfig:
     ball_max_radius: float = 0.03
     ball_max_aspect: float = 3.0  # motion blur stretches the ball
     ball_min_fill: float = 0.3  # blob area / enclosing-circle area
-    max_candidates_per_frame: int = 15  # more than this = camera shake, skip frame
+    max_candidates_per_frame: int = 15  # keep only the roundest this many per frame
 
     # --- Tracking -----------------------------------------------------------
     track_gate: float = 0.06  # association radius, frame heights (+ speed term)
@@ -64,7 +64,7 @@ class AnalysisConfig:
 
     # --- Highlight: big kill (ball rebounds high off the floor) -------------
     attack_min_speed: float = 10.0  # m/s into the floor for it to be an attack
-    attack_min_steepness: float = 0.35  # downward share of that speed
+    attack_min_steepness: float = 0.25  # downward share of that speed (~15 degrees)
     big_kill_min_rise: float = 3.0  # m the ball climbs after the bounce
     big_kill_strong_rise: float = 6.0
     rally_end_window: float = 4.0  # s: a landing this close to the end ended it
