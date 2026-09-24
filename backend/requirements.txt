@@ -2,3 +2,5 @@ fastapi
 uvicorn[standard]
 sqlalchemy
 python-multipart
+numpy
+opencv-python-headless
