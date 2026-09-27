@@ -1,5 +1,6 @@
 # Backend
 backend/venv/
+backend/.venv/
 backend/data/
 backend/volleyball.db
 __pycache__/
