@@ -1,55 +1,57 @@
 const API_BASE = 'http://localhost:8000'
 
-export async function uploadMatch(title, file) {
+export async function uploadMatch(title, file, playedOn) {
   const form = new FormData()
   form.append('title', title)
+  if (playedOn) form.append('played_on', playedOn)
   form.append('file', file)
-  const res = await fetch(`${API_BASE}/matches/`, { method: 'POST', body: form })
-  if (!res.ok) throw new Error('Failed to upload match')
-  return res.json()
+  const res = await fetch(`${API_BASE}/matches`, { method: 'POST', body: form })
+  return jsonOrThrow(res, 'Failed to upload match')
 }
 
 export async function listMatches() {
-  const res = await fetch(`${API_BASE}/matches/`)
-  return res.json()
+  const res = await fetch(`${API_BASE}/matches`)
+  return jsonOrThrow(res, 'Failed to load matches')
 }
 
 export async function listRallies(matchId) {
-  const res = await fetch(`${API_BASE}/matches/${matchId}/rallies/`)
-  return res.json()
+  const res = await fetch(`${API_BASE}/matches/${matchId}/rallies`)
+  return jsonOrThrow(res, 'Failed to load rallies')
 }
 
+// rally = { start, end, outcome, skills?, player?, notes? }. The clip is cut automatically.
 export async function createRally(matchId, rally) {
-  const res = await fetch(`${API_BASE}/matches/${matchId}/rallies/`, {
+  const res = await fetch(`${API_BASE}/matches/${matchId}/rallies`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(rally),
   })
-  if (!res.ok) throw new Error('Failed to save rally')
-  return res.json()
+  return jsonOrThrow(res, 'Failed to save rally')
 }
 
-export async function exportClip(matchId, rallyId) {
-  const res = await fetch(
-    `${API_BASE}/matches/${matchId}/rallies/${rallyId}/export-clip`,
-    { method: 'POST' },
-  )
-  if (!res.ok) throw new Error('Failed to export clip')
-  return res.json()
+export async function reclip(rallyId) {
+  const res = await fetch(`${API_BASE}/rallies/${rallyId}/reclip`, { method: 'POST' })
+  return jsonOrThrow(res, 'Failed to re-cut clip')
 }
 
-export async function buildHighlightReel(matchId, outcomes) {
-  const res = await fetch(`${API_BASE}/matches/${matchId}/highlight-reel/`, {
+export async function deleteRally(rallyId) {
+  const res = await fetch(`${API_BASE}/rallies/${rallyId}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Failed to delete rally')
+}
+
+// filters = { title?, outcomes?, skills?, match_ids?, player?, highlights_only?, clip_ids? }
+export async function createReel(filters) {
+  const res = await fetch(`${API_BASE}/reels`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ outcomes }),
+    body: JSON.stringify(filters),
   })
-  if (!res.ok) throw new Error('Failed to build highlight reel')
-  return res.json()
+  return jsonOrThrow(res, 'Failed to build highlight reel')
 }
 
-export function videoUrl(relativePath) {
-  return `${API_BASE}/${relativePath}`
+// The API returns media as server-relative URLs (/media/...).
+export function mediaUrl(url) {
+  return url ? `${API_BASE}${url}` : null
 }
 
 // --- Automatic highlight detection ---------------------------------------

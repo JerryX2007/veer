@@ -4,8 +4,8 @@ import {
   formatTime,
   getAnalysis,
   renderAutoReel,
+  mediaUrl,
   startAnalysis,
-  videoUrl,
 } from '../api.js'
 
 const POLL_MS = 2000
@@ -196,7 +196,7 @@ export default function AutoHighlights({ match, videoRef }) {
                   {rendering ? 'Rendering…' : 'Render reel to MP4'}
                 </button>
                 {rendered && (
-                  <a href={videoUrl(rendered.reel_path)} target="_blank" rel="noreferrer">
+                  <a href={mediaUrl(rendered.reel_url)} target="_blank" rel="noreferrer">
                     Open rendered reel
                   </a>
                 )}

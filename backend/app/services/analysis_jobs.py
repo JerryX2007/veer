@@ -5,11 +5,11 @@ immediately; the frontend polls the run's status and progress.
 """
 
 import time
-from datetime import datetime
 
 from sqlalchemy.orm import Session, sessionmaker
 
 from .. import models
+from ..models import utcnow
 from ..analysis import AnalysisConfig, analyze_video
 from ..analysis.highlights import Highlight
 from ..analysis.rallies import Rally
@@ -66,7 +66,7 @@ def run_analysis(run_id: int, session_factory: sessionmaker) -> None:
         run.status = "failed"
         run.error = f"{type(e).__name__}: {e}"
     finally:
-        run.finished_at = datetime.utcnow()
+        run.finished_at = utcnow()
         db.commit()
         db.close()
 
@@ -92,5 +92,5 @@ def mark_interrupted_runs(db: Session) -> None:
     for run in db.query(models.AnalysisRun).filter(models.AnalysisRun.status.in_(ACTIVE_STATUSES)):
         run.status = "failed"
         run.error = "Interrupted: the server restarted during analysis. Start it again."
-        run.finished_at = datetime.utcnow()
+        run.finished_at = utcnow()
     db.commit()

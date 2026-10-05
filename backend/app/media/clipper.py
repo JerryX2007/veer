@@ -114,3 +114,15 @@ def concat_reel(clips: list[Path], out: Path) -> Path:
 
     tmp.replace(out)
     return out
+
+
+def render_segments(source: Path, segments: list[Window], out: Path, *, source_has_audio: bool) -> Path:
+    """Cut each window out of one source video and join them into a single file (the automatic reel)."""
+    if not segments:
+        raise ValueError("a reel needs at least one segment")
+    with tempfile.TemporaryDirectory(dir=out.parent if out.parent.exists() else None) as tmpdir:
+        parts = [
+            cut_clip(source, w, Path(tmpdir) / f"part{i}.mp4", source_has_audio=source_has_audio)
+            for i, w in enumerate(segments)
+        ]
+        return concat_reel(parts, out)

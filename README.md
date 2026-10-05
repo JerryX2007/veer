@@ -9,12 +9,14 @@ height and arm angle over time.
 ## How it's organized
 
 - `backend/` — FastAPI + SQLite. Handles video upload, rally tagging, clip
-  export (ffmpeg), and highlight reel concatenation.
+  cutting (ffmpeg), and highlight reels. Files live under `backend/data/media/`
+  and are served at `/media/...`.
 - `backend/app/analysis/` — automatic rally and highlight detection. Plain
   Python + NumPy/OpenCV with no web or database code, so it also runs from
   the command line.
 - `frontend/` — React + Vite. Upload a match, scrub through it, mark rally
-  start/end points, tag an outcome, and export clips.
+  start/end points and tag an outcome (clips are cut automatically), and run
+  automatic highlight detection.
 
 The `data/` directory (uploaded videos and exported clips) and the SQLite
 file are created automatically on first run and are git-ignored.
@@ -54,12 +56,13 @@ Open the URL Vite prints (usually `http://localhost:5173`).
 
 1. Upload a match video with a title.
 2. Click it to open the tagger. Play the video, click **Mark rally start**
-   at the beginning of a rally, then click the outcome (kill, ace, error...)
-   once the rally ends — that saves the tagged time range.
-3. Click **Export clip** on any tagged rally to cut it out with ffmpeg.
-4. Once you've exported a few clips, `POST /matches/{id}/highlight-reel/`
-   with `{"outcomes": ["kill", "ace"]}` (via the `/docs` page, or a frontend
-   button once you add one) to concatenate them into one reel.
+   at the beginning of a rally, tick any skills (serve, attack…), then click
+   the outcome (kill, ace, block…) once the rally ends. That saves the rally
+   and cuts its clip in the background; a **clip** link appears when it's ready.
+3. Click a rally's time range to jump the video there.
+4. To stitch tagged clips into one video, `POST /reels` with filters such as
+   `{"title": "My kills", "outcomes": ["kill"], "player": "me"}` (via the
+   `/docs` page), then download it from `GET /reels/{id}/download`.
 
 ### Automatic highlights
 
@@ -155,11 +158,10 @@ to look at it.
 This scaffold covers **phase 1** — the reliable, demoable core: upload, tag,
 export, highlight reel. It's fully working end to end.
 
-**Phase 2** (not yet implemented — see `backend/app/services/pose.py` for
-the plan): run MediaPipe Pose on clips already tagged `serve` or `attack`
-(never a whole match — that's what keeps this tractable), extract a couple
-of concrete metrics (jump height, arm angle at contact), and store them
-against each rally via the `Metric` model, which already exists.
+**Phase 2** (not yet implemented): run pose estimation on the clips waiting
+in `GET /pipeline/pose-queue` — only those tagged `serve` or `attack`, never
+a whole match, which is what keeps this tractable — and extract a couple of
+concrete metrics (jump height, arm angle at contact) per rally.
 
 **Phase 3**: a trends view charting those metrics over time, and optionally
 a skeleton overlay rendered on top of the clip.
@@ -167,9 +169,11 @@ a skeleton overlay rendered on top of the clip.
 ## Data model
 
 - `Match` — one uploaded video
-- `Rally` — a tagged time range within a match, with an outcome and,
-  once exported, a `clip_path`
-- `Metric` — a named value attached to a rally (populated in phase 2)
+- `Rally` — a tagged time range within a match, with an outcome, skills and
+  an optional player
+- `Clip` — the rally's cut video and thumbnail; serve/attack clips are queued
+  for pose estimation (phase 2, `GET /pipeline/pose-queue`)
+- `Reel` — tagged clips concatenated into one video
 - `AnalysisRun` — one automatic-detection pass over a match (status,
   progress, settings, diagnostics)
 - `DetectedRally` / `DetectedHighlight` — what that run found; the reel is

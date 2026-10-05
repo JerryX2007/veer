@@ -1,12 +1,8 @@
-<<<<<<< Updated upstream
-from datetime import datetime
-from typing import Any, Optional
-=======
 from __future__ import annotations
->>>>>>> Stashed changes
 
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -134,16 +130,14 @@ class ReelOut(BaseModel):
     created_at: datetime
     url: str | None = None
 
-<<<<<<< Updated upstream
+    @classmethod
+    def build(cls, r) -> ReelOut:
+        out = cls.model_validate(r)
+        out.url = media_url(r.path)
+        return out
 
-class HighlightReelRequest(BaseModel):
-    outcomes: list[str]
 
-
-class HighlightReelOut(BaseModel):
-    reel_path: str
-    clip_count: int
-
+# ---------- automatic highlight detection (routers/analysis.py) -------------------------------------------
 
 class AnalysisRequest(BaseModel):
     # AnalysisConfig overrides, e.g. {"net_x": 0.45}
@@ -152,7 +146,6 @@ class AnalysisRequest(BaseModel):
 
 class DetectedHighlightOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
     id: int
     kind: str
     label: str
@@ -164,12 +157,11 @@ class DetectedHighlightOut(BaseModel):
 
 class DetectedRallyOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
     id: int
     index: int
     start_time: float
     end_time: float
-    serve_time: Optional[float] = None
+    serve_time: float | None = None
     highlights: list[DetectedHighlightOut]
 
 
@@ -191,7 +183,8 @@ class ReelSegmentOut(BaseModel):
     highlights: list[ReelHighlightOut]
 
 
-class ReelOut(BaseModel):
+class AutoReelOut(BaseModel):
+    """The automatic highlight reel as timestamps into the source video (not a rendered file)."""
     duration: float
     segments: list[ReelSegmentOut]
     text: str  # the same timestamps as plain text
@@ -199,21 +192,20 @@ class ReelOut(BaseModel):
 
 class AnalysisRunOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
     id: int
     match_id: int
     status: str
     progress: float
-    error: Optional[str] = None
+    error: str | None = None
     settings: dict[str, Any]
-    diagnostics: Optional[dict[str, Any]] = None
+    diagnostics: dict[str, Any] | None = None
     created_at: datetime
-    finished_at: Optional[datetime] = None
+    finished_at: datetime | None = None
 
 
 class AnalysisOut(AnalysisRunOut):
     rallies: list[DetectedRallyOut] = []
-    reel: Optional[ReelOut] = None
+    reel: AutoReelOut | None = None
 
 
 class RallyEvaluationOut(BaseModel):
@@ -222,18 +214,12 @@ class RallyEvaluationOut(BaseModel):
     matched: int
     precision: float
     recall: float
-    mean_start_error: Optional[float] = None  # detected minus tagged, seconds
-    mean_end_error: Optional[float] = None
+    mean_start_error: float | None = None  # detected minus tagged, seconds
+    mean_end_error: float | None = None
 
 
 class RenderedReelOut(BaseModel):
     reel_path: str
+    reel_url: str | None = None
     segment_count: int
     duration: float
-=======
-    @classmethod
-    def build(cls, r) -> ReelOut:
-        out = cls.model_validate(r)
-        out.url = media_url(r.path)
-        return out
->>>>>>> Stashed changes

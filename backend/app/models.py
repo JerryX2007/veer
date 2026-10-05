@@ -1,19 +1,16 @@
-"""Data model: a Match (one uploaded video) has many Rallies; each Rally gets one Clip; Reels stitch clips together."""
+"""Data model: a Match (one uploaded video) has many Rallies; each Rally gets one Clip; Reels stitch clips together.
+
+AnalysisRun / DetectedRally / DetectedHighlight hold the results of automatic highlight detection.
+"""
 from __future__ import annotations
 
-<<<<<<< Updated upstream
-from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String
-from sqlalchemy.orm import relationship
-
-from .analysis.highlights import KIND_LABELS
-from .database import Base
-=======
 import enum
 from datetime import datetime, timezone
 
 from sqlalchemy import JSON, DateTime, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from .analysis.highlights import KIND_LABELS
 from .db import Base
 
 
@@ -58,7 +55,6 @@ class PoseStatus(str, enum.Enum):
     processing = "processing"
     ready = "ready"
     failed = "failed"
->>>>>>> Stashed changes
 
 
 class Match(Base):
@@ -79,8 +75,8 @@ class Match(Base):
     rallies: Mapped[list[Rally]] = relationship(
         back_populates="match", cascade="all, delete-orphan", order_by="Rally.start"
     )
-    analysis_runs = relationship(
-        "AnalysisRun", back_populates="match", cascade="all, delete-orphan"
+    analysis_runs: Mapped[list[AnalysisRun]] = relationship(
+        back_populates="match", cascade="all, delete-orphan", order_by="AnalysisRun.id"
     )
 
 
@@ -127,71 +123,6 @@ class Clip(Base):
 
     rally: Mapped[Rally] = relationship(back_populates="clip")
 
-<<<<<<< Updated upstream
-    rally = relationship("Rally", back_populates="metrics")
-
-
-class AnalysisRun(Base):
-    """One pass of automatic rally/highlight detection over a match video."""
-
-    __tablename__ = "analysis_runs"
-
-    id = Column(Integer, primary_key=True, index=True)
-    match_id = Column(Integer, ForeignKey("matches.id"), nullable=False, index=True)
-    status = Column(String, nullable=False, default="pending")  # pending, running, done, failed
-    progress = Column(Float, nullable=False, default=0.0)  # 0-1
-    error = Column(String, nullable=True)
-    settings = Column(JSON, nullable=False, default=dict)  # AnalysisConfig overrides
-    diagnostics = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    finished_at = Column(DateTime, nullable=True)
-
-    match = relationship("Match", back_populates="analysis_runs")
-    rallies = relationship(
-        "DetectedRally", back_populates="run", cascade="all, delete-orphan",
-        order_by="DetectedRally.index",
-    )
-
-
-class DetectedRally(Base):
-    """A rally found automatically: the clip runs from just before the serve to the dead ball."""
-
-    __tablename__ = "detected_rallies"
-
-    id = Column(Integer, primary_key=True, index=True)
-    run_id = Column(Integer, ForeignKey("analysis_runs.id"), nullable=False, index=True)
-    index = Column(Integer, nullable=False)  # order within the match
-    start_time = Column(Float, nullable=False)  # clip start (serve minus pre-roll)
-    end_time = Column(Float, nullable=False)  # clip end (dead ball plus post-roll)
-    serve_time = Column(Float, nullable=True)  # null if the serve wasn't seen
-
-    run = relationship("AnalysisRun", back_populates="rallies")
-    highlights = relationship(
-        "DetectedHighlight", back_populates="rally", cascade="all, delete-orphan",
-        order_by="DetectedHighlight.time",
-    )
-
-
-class DetectedHighlight(Base):
-    """A highlight moment inside a detected rally (big kill, great save, block...)."""
-
-    __tablename__ = "detected_highlights"
-
-    id = Column(Integer, primary_key=True, index=True)
-    rally_id = Column(Integer, ForeignKey("detected_rallies.id"), nullable=False, index=True)
-    kind = Column(String, nullable=False, index=True)
-    time = Column(Float, nullable=False)  # seconds into the source video
-    score = Column(Float, nullable=False)  # 0.5-1
-    description = Column(String, nullable=False, default="")
-    details = Column(JSON, nullable=False, default=dict)
-
-    rally = relationship("DetectedRally", back_populates="highlights")
-
-    @property
-    def label(self) -> str:
-        return KIND_LABELS.get(self.kind, self.kind)
-=======
-
 class Reel(Base):
     __tablename__ = "reels"
 
@@ -204,4 +135,62 @@ class Reel(Base):
     path: Mapped[str | None] = mapped_column(String(500))
     duration: Mapped[float | None] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
->>>>>>> Stashed changes
+
+
+class AnalysisRun(Base):
+    """One pass of automatic rally/highlight detection over a match video."""
+
+    __tablename__ = "analysis_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    match_id: Mapped[int] = mapped_column(ForeignKey("matches.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending, running, done, failed
+    progress: Mapped[float] = mapped_column(Float, default=0.0)  # 0-1
+    error: Mapped[str | None] = mapped_column(Text)
+    settings: Mapped[dict] = mapped_column(JSON, default=dict)  # AnalysisConfig overrides
+    diagnostics: Mapped[dict | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    match: Mapped[Match] = relationship(back_populates="analysis_runs")
+    rallies: Mapped[list[DetectedRally]] = relationship(
+        back_populates="run", cascade="all, delete-orphan", order_by="DetectedRally.index"
+    )
+
+
+class DetectedRally(Base):
+    """A rally found automatically: the clip runs from just before the serve to the dead ball."""
+
+    __tablename__ = "detected_rallies"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("analysis_runs.id", ondelete="CASCADE"), index=True)
+    index: Mapped[int] = mapped_column(Integer)  # order within the match
+    start_time: Mapped[float] = mapped_column(Float)  # clip start (serve minus pre-roll)
+    end_time: Mapped[float] = mapped_column(Float)  # clip end (dead ball plus post-roll)
+    serve_time: Mapped[float | None] = mapped_column(Float)  # null if the serve wasn't seen
+
+    run: Mapped[AnalysisRun] = relationship(back_populates="rallies")
+    highlights: Mapped[list[DetectedHighlight]] = relationship(
+        back_populates="rally", cascade="all, delete-orphan", order_by="DetectedHighlight.time"
+    )
+
+
+class DetectedHighlight(Base):
+    """A highlight moment inside a detected rally (big kill, great save, block...)."""
+
+    __tablename__ = "detected_highlights"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    rally_id: Mapped[int] = mapped_column(ForeignKey("detected_rallies.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(40), index=True)
+    time: Mapped[float] = mapped_column(Float)  # seconds into the source video
+    score: Mapped[float] = mapped_column(Float)  # 0.5-1
+    description: Mapped[str] = mapped_column(String(500), default="")
+    details: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    rally: Mapped[DetectedRally] = relationship(back_populates="highlights")
+
+    @property
+    def label(self) -> str:
+        return KIND_LABELS.get(self.kind, self.kind)

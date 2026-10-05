@@ -1,13 +1,17 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
-from .. import database, models, schemas
+from pathlib import Path
+
+from .. import db as database
+from .. import models, schemas
 from ..analysis import AnalysisConfig
 from ..analysis.evaluate import evaluate_rallies
 from ..analysis.reel import reel_to_text
-from ..database import get_db
+from ..config import settings
+from ..db import get_db
+from ..media import clipper
 from ..services.analysis_jobs import ACTIVE_STATUSES, reel_for_run, run_analysis
-from ..services.video import render_segments
 
 router = APIRouter(prefix="/matches/{match_id}/analysis", tags=["analysis"])
 
@@ -77,11 +81,11 @@ def get_analysis(match_id: int, db: Session = Depends(get_db)):
     run = _latest_run(match_id, db)
     out = schemas.AnalysisOut.model_validate(run)
     if run.status == "done":
-        out.reel = schemas.ReelOut(**_reel_out(run))
+        out.reel = schemas.AutoReelOut(**_reel_out(run))
     return out
 
 
-@router.get("/reel", response_model=schemas.ReelOut)
+@router.get("/reel", response_model=schemas.AutoReelOut)
 def get_reel(match_id: int, db: Session = Depends(get_db)):
     """The highlight reel as timestamps: one serve-to-end segment per highlighted rally."""
     return _reel_out(_finished_run(match_id, db))
@@ -107,7 +111,7 @@ def evaluate(match_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Tag some rallies by hand first to compare against")
     return evaluate_rallies(
         [(r.start_time, r.end_time) for r in run.rallies],
-        [(r.start_time, r.end_time) for r in tagged],
+        [(r.start, r.end) for r in tagged],
     )
 
 
@@ -118,9 +122,15 @@ def render_reel(match_id: int, db: Session = Depends(get_db)):
     reel = reel_for_run(run)
     if not reel.segments:
         raise HTTPException(status_code=400, detail="No highlights to put in a reel")
-    path = render_segments(
-        run.match.video_path,
-        [(s.start, s.end) for s in reel.segments],
-        f"match{match_id}_auto_highlights.mp4",
+    out = clipper.render_segments(
+        Path(run.match.video_path),
+        [clipper.Window(s.start, s.end) for s in reel.segments],
+        settings.reels_dir / f"match{match_id}_auto_highlights.mp4",
+        source_has_audio=run.match.has_audio,
     )
-    return {"reel_path": path, "segment_count": len(reel.segments), "duration": round(reel.duration, 2)}
+    return {
+        "reel_path": str(out),
+        "reel_url": schemas.media_url(str(out)),
+        "segment_count": len(reel.segments),
+        "duration": round(reel.duration, 2),
+    }

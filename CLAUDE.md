@@ -1,151 +1,84 @@
-# SideOut — volleyball VOD analyzer
+# Veer — volleyball VOD analyzer
 
-<!-- Maintainers: keep this file under 200 lines. Area-specific rules belong in
-.claude/rules/*.md with `paths:` frontmatter (e.g. app/** or engine/sideout/stages/**). -->
+Local web app: upload match footage, tag rallies (clips are cut automatically), detect rallies and
+highlights automatically, click any timestamp to jump the video there, and export highlight reels.
+Single user, runs on your own machine. `PRD.md` is the long-term product spec (box score, player
+tracking, "describe a player"); this code is its early phase. Read the relevant PRD section before
+building a new feature, and check the "Where the code is vs the PRD" list below.
 
-Local-first desktop app: the user uploads a volleyball match video and gets a box score
-(kills, attack errors, attempts, hitting %, aces, service errors, reception errors, digs,
-blocks, assists), a clickable event log that seeks an in-app player, a "describe a player"
-tracker, and highlight reels. Everything runs on the user's machine. Product spec:
-`docs/PRD.md` (read the relevant section before building a feature; don't import it here).
-
-## Repo layout
+## Layout
 
 ```
-app/                React + TypeScript (Vite) UI
-  src/viewer/       video element, timeline, overlay canvas, keyboard shortcuts
-  src/events/       event log, filters, review mode
-  src/players/      player gallery, describe-a-player, merge/split
-  src/highlights/   highlight list, playlist preview, export dialog
-  src/api/          GENERATED client + types from the engine's OpenAPI schema
-desktop/            Tauri shell; starts the engine as a sidecar
-engine/sideout/     Python package: local API + inference pipeline
-  api/              FastAPI routes; schemas.py holds every request/response model
-  jobs/             job runner, rally chunking, resume
-  stages/           one module per pipeline stage (see "Pipeline")
-  domain/           events.py, stats.py (stat definitions), rules.py (rally grammar)
-  media/            FFmpeg/PyAV: proxy, frame reading, clips, reels
-  models/           ONNX Runtime sessions + model registry
-  store/            SQLite (projects, events, jobs) and Parquet (per-frame tracks); migrations/
-engine/tests/       unit, golden (short clips + expected event logs), fixtures
-training/           PyTorch training and ONNX export. NEVER imported by engine/
-eval/               evaluation harness, metric code, reports/
-data/               gitignored: videos, labels, weights
+backend/                FastAPI + SQLAlchemy 2 + SQLite (Python 3.10+)
+  app/main.py           app factory, lifespan (checks ffmpeg, creates dirs, init DB), /media static mount
+  app/config.py         Settings (pydantic-settings); every field overridable via VB_* env vars
+  app/db.py             DeclarativeBase, init_engine(), get_db()
+  app/models.py         Match, Rally, Clip, Reel (manual path) + AnalysisRun, DetectedRally, DetectedHighlight
+  app/schemas.py        all request/response models; media_url() turns stored paths into /media/... URLs
+  app/routers/          matches, rallies, reels (+ /pipeline/pose-queue), analysis (/matches/{id}/analysis/)
+  app/media/            ffmpeg wrappers, clipper (cut/concat/render_segments), pipeline stages, jobs (thread pool)
+  app/analysis/         automatic detection: pure Python + NumPy/OpenCV, no web/DB imports; CLI via -m app.analysis
+  app/services/         analysis_jobs.py (runs detection, stores results); video.py is legacy, unused
+  tests/                pytest; synthetic.py renders a fake match with scripted highlights
+frontend/               React 18 + Vite, plain JS, no router/state library
+  src/api.js            every backend call; API_BASE = http://localhost:8000
+  src/components/       UploadMatch, RallyTagger (video + manual tagging), AutoHighlights
 ```
 
 ## Commands
 
-- Setup: `make setup` (runs `uv sync` in engine/ and `pnpm install` in app/)
-- Dev: `make dev` (engine API on 127.0.0.1:8765 with reload + Vite + Tauri window)
-- Engine only: `cd engine && uv run sideout serve --reload`
-- Tests: `cd engine && uv run pytest -q`; golden clips: `uv run pytest -m golden`; UI: `pnpm -C app test`
-- Lint/types: `cd engine && uv run ruff check . && uv run ruff format --check . && uv run mypy sideout`;
-  UI: `pnpm -C app lint && pnpm -C app typecheck`
-- Regenerate API types after any schema change: `pnpm -C app gen:api`
-- Accuracy eval: `make eval SPLIT=dev` → `eval/reports/<timestamp>.md`
-- Speed benchmark: `make bench` (10-minute fixture, per-stage fps)
-- License audit: `make licenses`
+- Backend setup: `cd backend && python3 -m venv venv && ./venv/bin/pip install -r requirements-dev.txt`
+- Run backend: `cd backend && ./venv/bin/uvicorn app.main:app --reload` (API docs at :8000/docs)
+- Run frontend: `cd frontend && npm install && npm run dev` (http://localhost:5173)
+- Tests: `cd backend && ./venv/bin/python -m pytest -q` (≈40 s; needs ffmpeg on PATH)
+- Frontend check: `cd frontend && npm run build` (there are no frontend tests or linter yet)
+- Tune detection on real footage: `./venv/bin/python -m app.analysis match.mp4 --set net_x=0.45 --json out.json`
 
-Before saying a change is done, run lint, typecheck and tests for every area you touched.
+Before saying a change is done, run the backend tests and `npm run build` if you touched the frontend.
 
-## Pipeline
+## How it works
 
-Stages run in this order; each is a module in `engine/sideout/stages/`:
-`ingest` → `court` → `rallies` → (`ball` ‖ `players` → `identity`) → `touches` → `outcome`
-→ event log → `stats` / `highlights`.
+Two paths share one Match and its video:
 
-- Every stage implements the contract in `stages/base.py`: `run(ctx, inputs) -> StageOutput`.
-  A stage reads only the declared outputs of earlier stages, never their internals.
-- Outputs are cached under `(video_hash, stage, model_version)`. Changing a model or stage
-  logic means bumping its version string, or stale cache will be reused.
-- Heavy stages (`ball`, `players`, `identity`, `touches`) run only inside rally windows
-  (+2 s padding). Never run them over the whole video.
-- Ball runs at full fps; players at 10–15 fps with interpolation; jersey OCR on ≤ ~20
-  legible crops per track. Stream frames; never hold a whole video's frames in memory.
-- Rallies are independent work units in a process pool; results stream to the UI per rally.
+1. **Manual:** `POST /matches/{id}/rallies` → `pipeline.prepare_clip` → `jobs.submit(process_rally)` cuts a
+   padded clip + thumbnail. Clips tagged serve/attack get `pose_status=queued` (Phase 2 hook).
+   `POST /reels` concatenates ready clips picked by filters.
+2. **Automatic:** `POST /matches/{id}/analysis/` starts a background run (`services/analysis_jobs.run_analysis`)
+   → `analysis.analyze_video` → DetectedRally/DetectedHighlight rows. The reel is computed on read from
+   whichever highlights haven't been rejected; `POST .../reel/render` makes an MP4 in `media/reels/`.
 
-## Domain invariants (do not break)
+## Conventions and gotchas
 
-1. **The event log is the only source of truth.** Stats are computed from events in
-   `domain/stats.py` and never stored as truth. Caches must be invalidated on edit.
-2. **Time = seconds on the proxy timeline + frame index.** All analysis and playback use the
-   720p constant-frame-rate proxy made at ingest. Never use source-file timestamps after
-   ingest (phone video is often variable frame rate). `frame = round(t * fps)` is only valid
-   on the proxy.
-3. **Court coordinates are meters:** origin at a court corner, x along the 18 m length,
-   net at x = 9, y across the 9 m width. Pixels live only in tracks and overlays.
-   Boxes are stored as xyxy pixels at proxy resolution.
-4. **Never overwrite model output.** A user edit writes a new event with `source="user"`
-   that supersedes the old one (this is what makes undo and "show original" work).
-5. **Team = jersey color, never court side.** Teams switch ends every set. The libero wears a
-   contrasting jersey: flag as libero, don't cluster as a third team.
-6. **Stat definitions live only in `domain/stats.py`,** one function per stat, each with
-   table-driven tests that mirror the PRD's definitions table. Hitting % = (K − E) / TA,
-   `None` when TA = 0 (UI shows "—"), displayed as `.312` / `-.083`. Total blocks =
-   BS + 0.5 × BA. Points = K + SA + BS + 0.5 × BA.
-7. **Rally grammar lives in `domain/rules.py`:** every rally starts with a serve; max 3
-   contacts per side; a block touch is not one of the 3; possession flips when the ball
-   crosses the net. The `touches` stage decodes classifier output under these rules.
+- Times are seconds into the uploaded video, as floats. Manual rallies use `start`/`end`;
+  detected rallies use `start_time`/`end_time`/`serve_time`. Don't mix them up.
+- Files live under `settings.media_root` (default `backend/data/media/`) and are served at `/media/...`.
+  Store absolute/relative file paths in the DB; send URLs to the frontend via `schemas.media_url()`.
+- Every clip is re-encoded to one house format (`media/clipper.py`) so reels can stream-copy. Use
+  `clipper.cut_clip` / `concat_reel` / `render_segments`; don't shell out to ffmpeg elsewhere.
+- `app/analysis/` must stay free of FastAPI/SQLAlchemy imports. The ball tracker sits behind
+  `analysis/ball.py` → `Trajectory`, so a learned detector can replace it without touching downstream code.
+- Detection thresholds live only in `analysis/config.py` (`AnalysisConfig`); expose new ones there.
+- Two response models are named for reels: `ReelOut` (rendered manual reel) and `AutoReelOut`
+  (analysis reel as timestamps). Keep them separate.
+- No migrations yet: tables come from `Base.metadata.create_all`. After changing a model, delete
+  `backend/data/volleyball.db` locally (or add Alembic if data must be kept).
+- Tests set `VB_SYNC_JOBS=true` so jobs run inline, and use a temp media root/DB (`tests/conftest.py`).
+  Test media is generated (ffmpeg test patterns, `tests/synthetic.py`); never commit real footage.
+- When adding an endpoint, add its call to `frontend/src/api.js` and keep field names in sync by hand.
 
-## Frontend rules
+## Where the code is vs the PRD
 
-- TypeScript strict. Function components. Viewer state in Zustand (`src/viewer/store.ts`);
-  server data via TanStack Query. Styling with Tailwind.
-- Never hand-write API types; they come from `src/api/` (generated).
-- The UI never computes stats; it renders what the engine returns.
-- Seeking: set `video.currentTime`, then act on the `seeked` event. Overlays sync with
-  `requestVideoFrameCallback` using `metadata.mediaTime`, not `currentTime`.
-- Every stat cell, event row and highlight must be clickable and seek to its moment
-  (event time minus the 3 s pre-roll).
+- Done: upload, video viewer, clickable timestamps, rally detection, highlight detection, reels.
+- Not started: learned ball tracking (VballNet), player tracking/jersey OCR, describe-a-player,
+  touch/action classification, box score (kills, hitting %, digs…), review queue, desktop packaging.
+- The PRD's stat definitions are the spec for any stats code: hitting % = (K − E) / TA, shown as `.312`,
+  `None`/"—" when TA = 0. Put stat logic in one module, computed from events, with table-driven tests.
 
-## Engine rules
+## Rules
 
-- Python 3.12, full type hints, ruff (line length 100), mypy strict on `sideout/`.
-- Data crossing module boundaries: pydantic v2 models or frozen dataclasses, not dicts.
-- Comment numpy shapes where arrays are created or returned: `# (T, 17, 3) keypoints xyc`.
-- OpenCV frames are BGR; models take RGB. Convert only in `media/frames.py`.
-- Inference uses ONNX Runtime only (CUDA / DirectML / CoreML providers). No `torch` import
-  anywhere under `engine/` — it would bloat the shipped app. Training code goes in `training/`.
-- Load models through `models/registry.py` by name + version; weights are verified by checksum.
-- The engine makes no network calls at runtime unless a feature is explicitly opt-in.
-- DB schema changes need a migration in `store/migrations/`.
-
-## Licensing (checked by `make licenses`)
-
-Only MIT, BSD, Apache-2.0, ISC, or LGPL (FFmpeg, dynamically linked) dependencies and model
-weights. Do NOT add Ultralytics/YOLO packages or any AGPL/GPL code or weights. Check a
-dataset's terms before using it to train shipped weights (e.g. VNL-STES is research data).
-
-## Privacy and safety (hard rules)
-
-- No face recognition, and no model or code that outputs a person's race, ethnicity or other
-  protected attribute. Appearance words from a user's description (hair, skin tone, clothing)
-  go only to image-text similarity scoring against player crops.
-- Identities are per video. Do not persist embeddings across projects.
-- Never log description text, frames or crops. Telemetry (opt-in) never includes media.
-- Never commit videos, frames, crops, labels or weights. Test media comes only from
-  `engine/tests/fixtures/` (synthetic or licensed clips).
-- "Delete project" must remove proxy, crops, tracks, events and saved corrections.
-
-## Testing expectations
-
-- Domain code (stats, rules, outcome logic): unit tests for every rule, including edge cases
-  (TA = 0, block assist with 3 blockers, overpass, ace touched by receiver, antenna).
-- Stage changes: run `uv run pytest -m golden` and include the `make eval SPLIT=dev` report
-  diff in the PR description. CI blocks any metric drop > 2 points.
-- Performance: `make bench` must not regress any stage's throughput by more than 10%.
-- Budgets to protect: 1 h Tier A match in ≤ 15 min on the reference GPU laptop, first rally
-  timestamps ≤ 2 min, seek ≤ 300 ms, peak RAM ≤ 4 GB.
-
-## Adding a new event type or stat
-
-Touch all of these in one change: `domain/events.py` (enum) → `domain/stats.py` + tests →
-`api/schemas.py` → `pnpm -C app gen:api` → UI label/color map in `app/src/events/labels.ts`
-→ highlight weight in `stages/highlights.py` → `docs/PRD.md` definitions table.
-
-## Ask before
-
-- Changing any stat definition, the rally grammar, or the time/coordinate conventions.
-- Adding a dependency or model (state its license).
-- Changing the DB schema or the stage output format.
-- Anything that sends data off the machine.
+- Licensing: only MIT/BSD/Apache-2.0/ISC (or LGPL ffmpeg) dependencies and model weights. No Ultralytics
+  YOLO or other AGPL/GPL code or weights. State a new dependency's license when adding it.
+- Privacy: no face recognition, and nothing that outputs a person's race or ethnicity. Footage stays
+  local; the backend makes no outbound network calls.
+- Ask before: changing the DB schema in a way that loses data, adding a dependency or model,
+  or changing API field names the frontend relies on.

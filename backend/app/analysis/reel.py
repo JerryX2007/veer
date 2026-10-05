@@ -4,7 +4,7 @@ The reel doesn't cut anything: it's an ordered list of source-video time
 ranges, one per rally that contains a highlight, running from the serve to
 the end of the rally. Each highlight's moment is also given as a position in
 the reel. A player can play the reel by seeking through the ranges, or
-`services.video.render_segments` can turn it into one mp4.
+`media.clipper.render_segments` can turn it into one mp4.
 """
 
 from dataclasses import dataclass, field
